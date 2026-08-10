@@ -1813,6 +1813,110 @@ app.get('/api/wallet/:shopin_id', async (req, res) => {
     }
 });
 
+// Route 26b: Setup Pending Deposits Table (For Manual OPay Transfers)
+app.get('/api/admin/setup-pending-deposits', async (req, res) => {
+    try {
+        const createPendingDepositsTable = `
+            CREATE TABLE IF NOT EXISTS pending_deposits (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                amount_ngn NUMERIC(10,2) NOT NULL,
+                status VARCHAR(30) DEFAULT 'PENDING',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `;
+        await db.query(createPendingDepositsTable);
+        res.status(200).json({ status: "success", message: "Pending Deposits table created!" });
+    } catch (err) {
+        console.error("Setup Pending Deposits Error:", err.message);
+        res.status(500).json({ error: "Failed to create Pending Deposits table." });
+    }
+});
+
+// Route 26c: User Submits a Manual Deposit Claim
+app.post('/api/wallet/request-deposit', async (req, res) => {
+    const { shopin_id, amount_ngn } = req.body;
+
+    if (!shopin_id || !amount_ngn || amount_ngn <= 0) {
+        return res.status(400).json({ error: 'ShopIn ID and a valid amount are required.' });
+    }
+
+    try {
+        // 1. Find the user
+        const userQuery = await db.query('SELECT id FROM users WHERE shopin_id = $1', [shopin_id.trim()]);
+        if (userQuery.rows.length === 0) return res.status(404).json({ error: 'User not found.' });
+        
+        // 2. Log the pending claim
+        const insertQuery = `
+            INSERT INTO pending_deposits (user_id, amount_ngn)
+            VALUES ($1, $2) RETURNING *;
+        `;
+        const result = await db.query(insertQuery, [userQuery.rows[0].id, amount_ngn]);
+
+        res.status(201).json({ 
+            status: "success", 
+            message: "Transfer claim submitted! Waiting for Admin verification.",
+            pending_deposit: result.rows[0]
+        });
+    } catch (err) {
+        console.error("Request Deposit Error:", err.message);
+        res.status(500).json({ error: "Server error while requesting deposit." });
+    }
+});
+
+// Route 26d: Admin Approves the Deposit (Credits the Wallet)
+app.post('/api/admin/approve-deposit', verifyAdminMiddleware, async (req, res) => {
+    const { pending_deposit_id } = req.body;
+    const client = await db.getClient();
+
+    try {
+        await client.query('BEGIN');
+
+        // 1. Get the pending deposit
+        const pendingQuery = await client.query("SELECT * FROM pending_deposits WHERE id = $1 AND status = 'PENDING' FOR UPDATE", [pending_deposit_id]);
+        if (pendingQuery.rows.length === 0) {
+            await client.query('ROLLBACK');
+            client.release();
+            return res.status(404).json({ error: 'Pending deposit not found or already processed.' });
+        }
+        
+        const deposit = pendingQuery.rows[0];
+
+        // 2. Mark as APPROVED
+        await client.query("UPDATE pending_deposits SET status = 'APPROVED' WHERE id = $1", [pending_deposit_id]);
+
+        // 3. Update the Wallet (Reusing your existing wallet logic)
+        const upsertWalletQuery = `
+            INSERT INTO stash_wallets (user_id, available_balance)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET 
+                available_balance = stash_wallets.available_balance + EXCLUDED.available_balance,
+                last_updated = CURRENT_TIMESTAMP
+            RETURNING available_balance, id;
+        `;
+        const walletResult = await client.query(upsertWalletQuery, [deposit.user_id, deposit.amount_ngn]);
+
+        // 4. Record in Transaction Ledger
+        const refCode = `OPAY-MANUAL-${Math.floor(100000 + Math.random() * 900000)}`;
+        await client.query(
+            `INSERT INTO wallet_transactions (wallet_id, transaction_type, amount_ngn, reference_code)
+             VALUES ($1, 'MANUAL_DEPOSIT', $2, $3)`,
+            [walletResult.rows[0].id, deposit.amount_ngn, refCode]
+        );
+
+        await client.query('COMMIT');
+        client.release();
+
+        res.status(200).json({ status: "success", message: "Deposit approved and wallet credited!" });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        client.release();
+        console.error("Approve Deposit Error:", err.message);
+        res.status(500).json({ error: "Server error approving deposit." });
+    }
+});
+
 // Route 27: Setup Batch Shuttles
 app.get('/api/admin/setup-shuttles', async (req, res) => {
     try {
