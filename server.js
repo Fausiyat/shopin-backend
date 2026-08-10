@@ -2510,6 +2510,37 @@ app.put('/api/admin/locations', verifyAdminMiddleware, async (req, res) => {
     }
 });
 
+// Route: Admin Update Vendor Product/Item
+app.put('/api/admin/vendor-products/:id', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { product_name, price_ngn, category, location } = req.body;
+
+  try {
+    const result = await db.query(
+      `UPDATE vendor_products 
+       SET product_name = COALESCE($1, product_name),
+           price_ngn = COALESCE($2, price_ngn),
+           category = COALESCE($3, category),
+           location = COALESCE($4, location)
+       WHERE id = $5 RETURNING *`,
+      [product_name, price_ngn, category, location, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Product or restaurant item not found.' });
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Item updated successfully!',
+      product: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Error updating vendor product:', err);
+    res.status(500).json({ error: 'Server error updating item.' });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 ShopIn Backend running on http://localhost:${PORT}`);
