@@ -1917,6 +1917,24 @@ app.post('/api/admin/approve-deposit', verifyAdminMiddleware, async (req, res) =
     }
 });
 
+// Route 26e: Fetch all pending deposits for Admin Dashboard
+app.get('/api/admin/pending-deposits', verifyAdminMiddleware, async (req, res) => {
+    try {
+        const query = `
+            SELECT pd.id, pd.amount_ngn, pd.status, pd.created_at, u.full_name, u.shopin_id 
+            FROM pending_deposits pd
+            JOIN users u ON pd.user_id = u.id
+            WHERE pd.status = 'PENDING'
+            ORDER BY pd.created_at ASC;
+        `;
+        const result = await db.query(query);
+        res.status(200).json({ status: 'success', pending_deposits: result.rows });
+    } catch (err) {
+        console.error("Fetch Pending Deposits Error:", err.message);
+        res.status(500).json({ error: "Server error fetching pending deposits." });
+    }
+});
+
 // Route 27: Setup Batch Shuttles
 app.get('/api/admin/setup-shuttles', async (req, res) => {
     try {
@@ -2443,6 +2461,53 @@ app.put('/api/admin/shopper-pin', verifyAdminMiddleware, async (req, res) => {
     console.error("Update Shopper PIN Error:", err.message);
     res.status(500).json({ error: 'Server error updating shopper PIN.' });
   }
+});
+
+// Route 34: Fetch all dynamic locations (Markets, Supermarkets, Restaurants)
+app.get('/api/locations', async (req, res) => {
+    try {
+        const query = `SELECT key, value FROM platform_settings WHERE key IN ('markets', 'supermarkets', 'restaurants')`;
+        const result = await db.query(query);
+        
+        // These are the exact defaults you requested!
+        const locations = {
+            markets: ['Mandate', 'Oja Tuntun', 'Oja Oba', 'Ipata', 'Kulende'],
+            supermarkets: ['Shoprite', 'Emirate Mall', 'Shopmall'],
+            restaurants: ['Aroma', 'Captain Cook', 'Sheshede', 'Item 7', 'Food 101']
+        };
+
+        // If you have saved custom lists in the database, override the defaults
+        result.rows.forEach(row => {
+            try { locations[row.key] = JSON.parse(row.value); } catch(e) {}
+        });
+
+        res.status(200).json(locations);
+    } catch (err) {
+        console.error("Locations Fetch Error:", err.message);
+        res.status(500).json({ error: "Failed to fetch locations." });
+    }
+});
+
+// Route 35: Admin Update dynamic locations
+app.put('/api/admin/locations', verifyAdminMiddleware, async (req, res) => {
+    const { category, locations_array } = req.body;
+    
+    if (!['markets', 'supermarkets', 'restaurants'].includes(category)) {
+        return res.status(400).json({ error: 'Invalid location category' });
+    }
+
+    try {
+        await db.query(`
+            INSERT INTO platform_settings (key, value, updated_at) 
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP
+        `, [category, JSON.stringify(locations_array)]);
+
+        res.status(200).json({ status: 'success', message: `${category} updated successfully!` });
+    } catch (err) {
+        console.error("Update Locations Error:", err.message);
+        res.status(500).json({ error: "Server error updating locations." });
+    }
 });
 
 const PORT = process.env.PORT || 5000;
