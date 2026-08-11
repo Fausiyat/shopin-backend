@@ -3,7 +3,6 @@ const cors = require('cors');
 const axios = require('axios');
 require('dotenv').config();
 const db = require('./db');
-const { GoogleGenAI, Type } = require('@google/genai');
 
 const app = express();
 
@@ -92,15 +91,6 @@ const verifyShopperOrAdminMiddleware = async (req, res, next) => {
 
   return res.status(403).json({ error: 'Unauthorized: Invalid Shopper or Admin PIN.' });
 };
-
-
-// Check for missing key upfront
-if (!process.env.GEMINI_API_KEY) {
-  console.error("⚠️ WARNING: GEMINI_API_KEY is not defined in your .env file!");
-}
-
-// Initialize AI
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // 📱 EBULKSMS NOTIFICATION HELPER
 const sendSMS = async (to, message) => {
@@ -324,45 +314,27 @@ app.post('/api/orders/parse-list', async (req, res) => {
     OUTPUT FORMAT: JSON Object.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: raw_text,
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            user_shopin_id: { type: Type.STRING, nullable: true },
-            delivery_zone_preference: { type: Type.STRING, nullable: true },
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  item_name: { type: Type.STRING },
-                  brand_or_variant: { type: Type.STRING, nullable: true },
-                  quantity: { type: Type.NUMBER },
-                  unit: { type: Type.STRING },
-                  category: { type: Type.STRING },
-                  notes: { type: Type.STRING, nullable: true }
-                },
-                required: ['item_name', 'quantity', 'unit', 'category']
-              }
-            },
-            is_service_request: { type: Type.BOOLEAN },
-            unrecognized_tokens: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            }
-          },
-          required: ['items', 'is_service_request', 'unrecognized_tokens']
+ try {
+    // ⚡ GROQ / OPENAI COMPATIBLE API CALL
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: raw_text }
+        ],
+        response_format: { type: 'json_object' }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
         }
       }
-    });
+    );
 
-    const parsedOutput = JSON.parse(response.text);
+    const parsedOutput = JSON.parse(response.data.choices[0].message.content);
     aiParseCache.set(cacheKey, parsedOutput);
 
     return res.status(200).json({
@@ -733,19 +705,31 @@ app.post('/api/webhooks/sms', async (req, res) => {
 
         let parsedItems = [];
         try {
-            const systemInstruction = `You are ShopIn Kwara Parsing AI. Extract items, quantities, units, and categories as a JSON array with item_name, quantity, unit, and category. Split multiple items.`;
-            const aiResponse = await ai.models.generateContent({
-                model: 'gemini-3.6-flash',
-                contents: rawTextMessage,
-                config: {
-                    systemInstruction,
-                    responseMimeType: 'application/json'
+            const systemInstruction = `You are ShopIn Kwara Parsing AI. Extract items, quantities, units, and categories as a JSON array with item_name, quantity, unit, and category. Split multiple items. Output MUST be valid JSON format.`;
+            
+            // ⚡ GROQ / OPENAI COMPATIBLE API CALL
+            const response = await axios.post(
+              'https://api.groq.com/openai/v1/chat/completions',
+              {
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                  { role: 'system', content: systemInstruction },
+                  { role: 'user', content: rawTextMessage }
+                ],
+                response_format: { type: 'json_object' }
+              },
+              {
+                headers: {
+                  'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                  'Content-Type': 'application/json'
                 }
-            });
-            const parsedData = JSON.parse(aiResponse.text);
+              }
+            );
+            
+            const parsedData = JSON.parse(response.data.choices[0].message.content);
             parsedItems = parsedData.items || [];
         } catch (aiErr) {
-            console.warn("AI parsing fallback for SMS bot:", aiErr.message);
+            console.warn("AI parsing fallback for SMS bot:", aiErr.response?.data || aiErr.message);
             parsedItems = [{ item_name: rawTextMessage.trim(), quantity: 1, unit: 'unit', category: 'General' }];
         }
 
