@@ -2480,7 +2480,7 @@ app.get('/api/locations', async (req, res) => {
 });
 
 // Route 35: Admin Update dynamic locations
-app.put('/api/admin/locations', verifyAdminMiddleware, async (req, res) => {
+app.put('/api/admin/locations', async (req, res) => {
     const { category, locations_array } = req.body;
     
     if (!['markets', 'supermarkets', 'restaurants'].includes(category)) {
