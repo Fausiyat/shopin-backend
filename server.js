@@ -3,6 +3,13 @@ const cors = require('cors');
 const axios = require('axios');
 require('dotenv').config();
 const db = require('./db');
+db.query(`
+  CREATE TABLE IF NOT EXISTS platform_settings (
+    key VARCHAR(50) PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+`).catch(err => console.error("Table creation error:", err.message));
 
 const app = express();
 
@@ -207,7 +214,7 @@ app.post('/api/vendors/register', async (req, res) => {
         const result = await db.query(queryText, values);
 
         // 🔔 ADMIN ALERT: New Vendor Registered
-        const adminPhone = process.env.ADMIN_PHONE_NUMBER || '08000000000';
+        const adminPhone = process.env.ADMIN_PHONE_NUMBER || '08143086509';
         const smsAlert = `[ShopIn Admin Alert] 🏪 NEW VENDOR SIGNUP!\nBusiness: ${full_name}\nCategory: ${vendor_category}\nMode: ${contact_mode}\nID: ${shopin_id}`;
         sendSMS(adminPhone, smsAlert).catch(err => console.warn("Admin SMS alert failed:", err.message));
 
