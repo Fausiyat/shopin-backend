@@ -266,7 +266,7 @@ app.post('/api/users/address', async (req, res) => {
     }
 });
 
-// Route 4: AI Grocery List Parser (Kwara Catalog Engine)
+// Route 4: AI Grocery List Parser (Groq Engine)
 app.post('/api/orders/parse-list', async (req, res) => {
   const raw_text = req.body.raw_text || req.body.text || req.body.rawText;
 
@@ -291,38 +291,32 @@ app.post('/api/orders/parse-list', async (req, res) => {
 
   const systemInstruction = `
     You are the ShopIn Local Grocery, Goods & Micro-Services Parsing AI for Ilorin, Kwara State.
-    Your job is to parse unstructured input (from Web, SMS, WhatsApp) and output structured JSON.
+    Parse unstructured text input into a JSON object.
 
-    CRITICAL RULE - ITEM SPLITTING:
-    - You MUST separate distinct items into individual objects inside the "items" array.
-    - NEVER merge separate items into a single name!
+    CRITICAL RULE - YOU MUST FOLLOW THIS EXACT JSON OUTPUT STRUCTURE:
+    {
+      "items": [
+        {
+          "item_name": "Tomatoes",
+          "quantity": 500,
+          "unit": "naira_value",
+          "category": "Produce",
+          "notes": null
+        }
+      ],
+      "is_service_request": false,
+      "unrecognized_tokens": []
+    }
 
-    CRITICAL NAME SANITIZATION:
-    - "item_name" MUST ONLY contain the clean food/item product name (e.g., "Garri Ijebu", "Yam", "Foreign Rice").
-    - DO NOT include numbers, quantities, or measurement units inside "item_name"!
-
-    VARIABLE BUDGET & BRAND MATTERS:
-    - If a user specifies a Naira amount for produce/herbs/pepper (e.g. "500 naira tomatoes"), extract quantity as numeric Naira amount (e.g., 500) and set unit to "naira_value".
-    - Capture brand names if specified (e.g. "Dangote Spaghetti", "Golden Penny Spaghetti", "Power Oil", "Peak Milk").
-
-    LOCAL MEASUREMENTS & SIZES (ILORIN / KWARA):
-    - Grain and Beans: milk_tin, mudu, paint_rubber, 1/8 bag, 1/4 bag, half_bag, full_bag.
-    - Pasta: pack, carton.
-    - Oils & Liquids: "75cl", "5_litres", "12.5_litres", "25_litres".
-    - Proteins: "kg", "pieces".
-    - Eggs: crate (Must use unit value "crate").
-    - Produce: basket, half_basket, or naira_value.
-    - Tubers: tuber, heap.
-
-    WEARS & APPAREL: Category: Wearables.
-    ELECTRONICS: Category: Electronics.
-    SERVICES & ERRANDS: Set "is_service_request": true and Category: Services.
-
-    OUTPUT FORMAT: JSON Object.
+    RULES:
+    - Always output a root JSON object with an "items" array.
+    - Separate distinct items into individual objects inside "items".
+    - "item_name" MUST ONLY contain clean product names (e.g., "Tomatoes", "Ewedu", "Chicken").
+    - Extract Naira amounts (e.g. "500 naira tomatoes") with quantity: 500 and unit: "naira_value".
+    - Extract quantities & units (e.g. "1kg chicken") with quantity: 1 and unit: "kg".
   `;
 
- try {
-    // ⚡ GROQ / OPENAI COMPATIBLE API CALL
+  try {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
@@ -342,17 +336,37 @@ app.post('/api/orders/parse-list', async (req, res) => {
     );
 
     const parsedOutput = JSON.parse(response.data.choices[0].message.content);
-    aiParseCache.set(cacheKey, parsedOutput);
+
+    // 🛡️ SMART ARRAY NORMALIZER: Guarantees items is never empty if an array exists
+    let extractedItems = [];
+    if (Array.isArray(parsedOutput)) {
+      extractedItems = parsedOutput;
+    } else if (Array.isArray(parsedOutput.items)) {
+      extractedItems = parsedOutput.items;
+    } else {
+      // Find any array property inside parsedOutput if "items" was renamed
+      const arrayKey = Object.keys(parsedOutput).find(key => Array.isArray(parsedOutput[key]));
+      if (arrayKey) extractedItems = parsedOutput[arrayKey];
+    }
+
+    const finalResult = {
+      items: extractedItems,
+      is_service_request: parsedOutput.is_service_request || false,
+      unrecognized_tokens: parsedOutput.unrecognized_tokens || []
+    };
+
+    aiParseCache.set(cacheKey, finalResult);
 
     return res.status(200).json({
       status: 'success',
-      items: parsedOutput.items || [],
-      parsed_data: { ...parsedOutput, is_mock: false }
+      items: extractedItems,
+      parsed_data: { ...finalResult, is_mock: false }
     });
 
   } catch (err) {
-    console.error('--- GEMINI ERROR LOG ---', err.message || err);
+    console.error('--- GROQ PARSING ERROR LOG ---', err.response?.data || err.message);
 
+    // Local Regex Fallback
     const rawItems = raw_text.split(/\s*(?:and|,|\+|\n)\s*/i).filter(Boolean);
     const mockItems = rawItems.map(raw => ({
       item_name: raw.trim(),
