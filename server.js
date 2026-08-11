@@ -13,6 +13,9 @@ db.query(`
 
 const app = express();
 
+// ⚡ ADD THIS 1 LINE RIGHT HERE:
+app.set('trust proxy', 1);
+
 // --- PRODUCTION CORS SETUP ---
 const allowedOrigins = [
   'http://localhost:5173', // Local Vite dev server
