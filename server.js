@@ -3,6 +3,8 @@ const cors = require('cors');
 const axios = require('axios');
 require('dotenv').config();
 const db = require('./db');
+
+// 1. Create platform_settings table
 db.query(`
   CREATE TABLE IF NOT EXISTS platform_settings (
     key VARCHAR(50) PRIMARY KEY,
@@ -11,7 +13,17 @@ db.query(`
   );
 `).catch(err => console.error("Table creation error:", err.message));
 
+// 2. Add is_verified column to users table
+db.query(`
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+`).catch(err => console.error("User verification column error:", err.message));
 const app = express();
+
+// 3. Add Ratings to Vendor Products table
+db.query(`
+  ALTER TABLE vendor_products ADD COLUMN IF NOT EXISTS rating NUMERIC(3,1) DEFAULT 0.0;
+  ALTER TABLE vendor_products ADD COLUMN IF NOT EXISTS review_count INT DEFAULT 0;
+`).catch(err => console.error("Ratings column error:", err.message));
 
 // ⚡ ADD THIS 1 LINE RIGHT HERE:
 app.set('trust proxy', 1);
@@ -196,7 +208,7 @@ app.post('/api/users/register', async (req, res) => {
     }
 });
 
-// Route 2b: Register Vendor (Supports Category, Contact Mode: DIRECT vs MIDDLEMAN)
+// Route 2b: Register Vendor (Default unverified for security)
 app.post('/api/vendors/register', async (req, res) => {
     const { full_name, phone_number, email, vendor_category, contact_mode = 'MIDDLEMAN' } = req.body;
 
@@ -209,21 +221,21 @@ app.post('/api/vendors/register', async (req, res) => {
         const shopin_id = `VND-ILR-${randomNum}`;
 
         const queryText = `
-            INSERT INTO users (shopin_id, full_name, phone_number, email, user_role, vendor_category, contact_mode)
-            VALUES ($1, $2, $3, $4, 'vendor', $5, $6)
+            INSERT INTO users (shopin_id, full_name, phone_number, email, user_role, vendor_category, contact_mode, is_verified)
+            VALUES ($1, $2, $3, $4, 'vendor', $5, $6, FALSE)
             RETURNING *;
         `;
         const values = [shopin_id, full_name, phone_number, email || null, vendor_category, contact_mode.toUpperCase()];
         const result = await db.query(queryText, values);
 
-        // 🔔 ADMIN ALERT: New Vendor Registered
+        // 🔔 ADMIN ALERT: New Vendor Awaiting Approval
         const adminPhone = process.env.ADMIN_PHONE_NUMBER || '08143086509';
-        const smsAlert = `[ShopIn Admin Alert] 🏪 NEW VENDOR SIGNUP!\nBusiness: ${full_name}\nCategory: ${vendor_category}\nMode: ${contact_mode}\nID: ${shopin_id}`;
+        const smsAlert = `[ShopIn Admin] ⚠️ NEW VENDOR PENDING APPROVAL!\nBusiness: ${full_name}\nCategory: ${vendor_category}\nReview in Admin Console.`;
         sendSMS(adminPhone, smsAlert).catch(err => console.warn("Admin SMS alert failed:", err.message));
 
         res.status(201).json({
             status: "success",
-            message: `Vendor registered successfully in ${vendor_category} category!`,
+            message: `Registration received! Your account is pending admin verification.`,
             vendor_data: result.rows[0]
         });
     } catch (err) {
@@ -233,6 +245,48 @@ app.post('/api/vendors/register', async (req, res) => {
         console.error("Vendor Register Error:", err.message);
         res.status(500).json({ error: 'Server error while registering vendor.' });
     }
+});
+
+// 🔒 ADMIN: Fetch Unverified Pending Vendors
+app.get('/api/admin/pending-vendors', verifyAdminMiddleware, async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT id, shopin_id, full_name, phone_number, email, vendor_category, contact_mode, created_at 
+      FROM users 
+      WHERE user_role = 'vendor' AND is_verified = FALSE 
+      ORDER BY created_at DESC;
+    `);
+    res.status(200).json({ status: 'success', pending_vendors: result.rows });
+  } catch (err) {
+    console.error("Fetch Pending Vendors Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch pending vendors." });
+  }
+});
+
+// 🔒 ADMIN: Approve and Verify Vendor
+app.put('/api/admin/vendors/:id/verify', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query(`
+      UPDATE users 
+      SET is_verified = TRUE 
+      WHERE id = $1 AND user_role = 'vendor' 
+      RETURNING *;
+    `, [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Vendor not found.' });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Vendor verified and activated successfully!',
+      vendor: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Verify Vendor Error:", err.message);
+    res.status(500).json({ error: 'Server error verifying vendor.' });
+  }
 });
 
 // Route 3: Save Delivery Address
@@ -972,13 +1026,54 @@ app.post('/api/vendors/products', async (req, res) => {
     }
 });
 
-// Route: Fetch All Vendor Products & Services
+// Route: Submit a Vendor / Product Review
+app.post('/api/vendors/reviews', async (req, res) => {
+    const { product_id, rating } = req.body;
+
+    if (!product_id || !rating || rating < 1 || rating > 5) {
+        return res.status(400).json({ error: 'Valid Product ID and a rating between 1 and 5 are required.' });
+    }
+
+    try {
+        // This clever SQL updates the rolling average rating and adds 1 to the review count instantly!
+        const updateQuery = `
+            UPDATE vendor_products 
+            SET 
+                rating = CASE 
+                    WHEN review_count = 0 THEN $1::numeric
+                    ELSE ((rating * review_count) + $1::numeric) / (review_count + 1)
+                END,
+                review_count = review_count + 1
+            WHERE id = $2 
+            RETURNING rating, review_count;
+        `;
+        
+        const result = await db.query(updateQuery, [rating, product_id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Product or Service not found.' });
+        }
+
+        res.status(200).json({
+            status: "success",
+            message: "Thank you! Your review has been saved.",
+            new_stats: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error("Review Submission Error:", err.message);
+        res.status(500).json({ error: "Server error while saving your review." });
+    }
+});
+
+// Update Route: Fetch All Verified Vendor Products & Services
 app.get('/api/vendors/products', async (req, res) => {
     try {
         const queryText = `
             SELECT vp.*, u.full_name as vendor_name, u.phone_number 
             FROM vendor_products vp
             JOIN users u ON vp.vendor_id = u.id
+            WHERE u.is_verified = TRUE
             ORDER BY vp.created_at DESC;
         `;
         const result = await db.query(queryText);
@@ -2220,6 +2315,7 @@ app.get('/api/pools', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch food pools' });
   }
 });
+
 
 // POST /api/pools/:id/join - Join Food Pool
 app.post('/api/pools/:id/join', async (req, res) => {
