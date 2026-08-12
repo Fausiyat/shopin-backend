@@ -176,6 +176,26 @@ app.post('/api/admin/categories', verifyAdminMiddleware, async (req, res) => {
   }
 });
 
+// Route: Admin Delete Market Price Entry
+app.delete('/api/admin/prices/:id', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query('DELETE FROM market_prices WHERE id = $1 RETURNING *', [id]);
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Price item not found in database.' });
+    }
+    
+    res.json({
+      status: 'success',
+      message: 'Market price item deleted successfully!'
+    });
+  } catch (err) {
+    console.error("Delete Market Price Error:", err.message);
+    res.status(500).json({ error: 'Server error deleting price item.' });
+  }
+});
+
 
 // 📱 EBULKSMS NOTIFICATION HELPER
 const sendSMS = async (to, message) => {
