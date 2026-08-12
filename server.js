@@ -1513,7 +1513,6 @@ app.get('/api/market/ticker', async (req, res) => {
             SELECT item_name, unit, min_price_ngn, max_price_ngn, sourcing_market 
             FROM market_prices 
             ORDER BY last_updated DESC 
-            LIMIT 10;
         `;
         const prices = await db.query(tickerQuery);
 
