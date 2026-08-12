@@ -43,7 +43,7 @@ db.query(`
   ALTER TABLE orders ADD COLUMN IF NOT EXISTS processing_fee NUMERIC(10,2) DEFAULT 0.00;
 `).catch(err => console.error("Food Pools / Orders upgrade error:", err.message));
 
-// Setup Dynamic Marketplace Categories Table
+// 5. Setup Dynamic Marketplace Categories Table
 db.query(`
   CREATE TABLE IF NOT EXISTS marketplace_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -52,11 +52,40 @@ db.query(`
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Insert your current default tabs so they don't disappear
+  -- Insert default tabs so they don't disappear
   INSERT INTO marketplace_categories (category_name) VALUES 
   ('Foodstuff'), ('Wearables'), ('Electronics'), ('AB&S Services')
   ON CONFLICT (category_name) DO NOTHING;
 `).catch(err => console.error("Categories table error:", err.message));
+
+// Route: Fetch all marketplace categories for frontend tabs
+app.get('/api/marketplace/categories', async (req, res) => {
+  try {
+    const result = await db.query('SELECT category_name FROM marketplace_categories ORDER BY created_at ASC');
+    res.status(200).json({ status: 'success', categories: result.rows.map(r => r.category_name) });
+  } catch (err) {
+    console.error("Fetch Categories Error:", err.message);
+    res.status(500).json({ error: 'Failed to fetch categories.' });
+  }
+});
+
+// Route: Admin Add a brand new category (e.g. "House Agents")
+app.post('/api/admin/categories', verifyAdminMiddleware, async (req, res) => {
+  const { category_name } = req.body;
+  if (!category_name) return res.status(400).json({ error: 'Category name is required.' });
+
+  try {
+    const result = await db.query(
+      `INSERT INTO marketplace_categories (category_name) VALUES ($1) RETURNING *`,
+      [category_name.trim()]
+    );
+    res.status(201).json({ status: 'success', message: `Category "${category_name}" created successfully!`, category: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'This category already exists.' });
+    console.error("Create Category Error:", err.message);
+    res.status(500).json({ error: 'Server error creating category.' });
+  }
+});
 
 // ⚡ ADD THIS 1 LINE RIGHT HERE:
 app.set('trust proxy', 1);
