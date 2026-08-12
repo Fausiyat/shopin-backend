@@ -364,7 +364,7 @@ app.post('/api/orders/parse-list', async (req, res) => {
     });
   }
 
-  const systemInstruction = `
+ const systemInstruction = `
     You are the ShopIn Local Grocery, Goods & Micro-Services Parsing AI for Ilorin, Kwara State.
     Parse unstructured text input into a JSON object.
 
@@ -383,12 +383,13 @@ app.post('/api/orders/parse-list', async (req, res) => {
       "unrecognized_tokens": []
     }
 
-    RULES:
+    NIGERIAN MARKET RULES (CRITICAL):
+    - Understand local measurement units: "paint rubber", "paint", "mudu", "module", "congo", "tuber". 
+    - DO NOT treat "paint" or "rubber" as a separate item (e.g., "2 paint rubber garri" means item_name: "Garri", quantity: 2, unit: "paint_rubber").
+    - "tuber" refers to Yams or Sweet Potatoes. (e.g., "5 tubers of yam" means item_name: "Yam", quantity: 5, unit: "tuber").
     - Always output a root JSON object with an "items" array.
-    - Separate distinct items into individual objects inside "items".
-    - "item_name" MUST ONLY contain clean product names (e.g., "Tomatoes", "Ewedu", "Chicken").
+    - "item_name" MUST ONLY contain clean product names (e.g., "Garri Ijebu", "Yam", "Chicken").
     - Extract Naira amounts (e.g. "500 naira tomatoes") with quantity: 500 and unit: "naira_value".
-    - Extract quantities & units (e.g. "1kg chicken") with quantity: 1 and unit: "kg".
   `;
 
   try {
@@ -2417,6 +2418,45 @@ app.post('/api/pools/:id/join', async (req, res) => {
     client.release();
     console.error('Error joining pool transaction:', err);
     res.status(500).json({ error: 'Server error while joining pool' });
+  }
+});
+
+// PUT /api/admin/pools/:id - Admin Route to Edit a Food Pool
+app.put('/api/admin/pools/:id', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { item_name, target_item_name, price_per_slot, total_slots, sourcing_market, status } = req.body;
+  
+  try {
+    const result = await db.query(
+      `UPDATE food_pools 
+       SET pool_title = COALESCE($1, pool_title), 
+           target_item_name = COALESCE($2, target_item_name), 
+           price_per_slot = COALESCE($3, price_per_slot), 
+           total_slots = COALESCE($4, total_slots), 
+           sourcing_market = COALESCE($5, sourcing_market),
+           status = COALESCE($6, status)
+       WHERE id = $7 RETURNING *`,
+      [item_name, target_item_name, price_per_slot, total_slots, sourcing_market, status, id]
+    );
+    
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Pool not found.' });
+    res.json({ status: 'success', message: 'Pool updated successfully!', pool: result.rows[0] });
+  } catch (err) {
+    console.error("Edit Pool Error:", err.message);
+    res.status(500).json({ error: 'Server error updating pool.' });
+  }
+});
+
+// DELETE /api/admin/pools/:id - Admin Route to Delete a Food Pool
+app.delete('/api/admin/pools/:id', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query('DELETE FROM food_pools WHERE id = $1 RETURNING *', [id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Pool not found.' });
+    res.json({ status: 'success', message: 'Pool deleted successfully!' });
+  } catch (err) {
+    console.error("Delete Pool Error:", err.message);
+    res.status(500).json({ error: 'Server error deleting pool.' });
   }
 });
 
