@@ -25,6 +25,24 @@ db.query(`
   ALTER TABLE vendor_products ADD COLUMN IF NOT EXISTS review_count INT DEFAULT 0;
 `).catch(err => console.error("Ratings column error:", err.message));
 
+// 4. Setup Food Pools & Update Orders Table for Processing Fees
+db.query(`
+  CREATE TABLE IF NOT EXISTS food_pools (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      pool_title VARCHAR(100) NOT NULL,
+      target_item_name VARCHAR(100) NOT NULL,
+      sourcing_market VARCHAR(50) DEFAULT 'Mandate Market',
+      total_slots INT NOT NULL,
+      filled_slots INT DEFAULT 0,
+      price_per_slot NUMERIC(10,2) NOT NULL,
+      status VARCHAR(30) DEFAULT 'OPEN',
+      expires_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+
+  ALTER TABLE orders ADD COLUMN IF NOT EXISTS processing_fee NUMERIC(10,2) DEFAULT 0.00;
+`).catch(err => console.error("Food Pools / Orders upgrade error:", err.message));
+
 // ⚡ ADD THIS 1 LINE RIGHT HERE:
 app.set('trust proxy', 1);
 
@@ -719,6 +737,8 @@ app.post('/api/orders/create', async (req, res) => {
         const parsedOutput = req.body.parsed_json || { items: [] };
         const deliveryFee = req.body.delivery_fee || 1500;
         const serviceFee = req.body.service_fee || 500;
+        // 🌟 NEW: Grab the processing fee!
+        const processingFee = req.body.processing_fee || 0;
         const grandTotal = req.body.estimated_total || 0;
         const estimatedItemCost = req.body.estimated_item_cost || 0;
         const orderCode = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -727,11 +747,11 @@ app.post('/api/orders/create', async (req, res) => {
         const insertOrderQuery = `
             INSERT INTO orders (
                 order_code, user_id, channel, raw_input_text, parsed_json, 
-                estimated_item_cost, service_fee, delivery_fee, total_estimated_cost, order_status
+                estimated_item_cost, service_fee, delivery_fee, processing_fee, total_estimated_cost, order_status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING_CONFIRMATION')
             RETURNING *;
         `;
-        const orderValues = [orderCode, userId, channel, raw_text, JSON.stringify(parsedOutput), estimatedItemCost, serviceFee, deliveryFee, grandTotal];
+        const orderValues = [orderCode, userId, channel, raw_text, JSON.stringify(parsedOutput), estimatedItemCost, serviceFee, deliveryFee, processingFee, grandTotal];
         const savedOrder = await client.query(insertOrderQuery, orderValues);
 
         await client.query('COMMIT'); // Success! Save everything.
@@ -2313,6 +2333,38 @@ app.get('/api/pools', async (req, res) => {
   } catch (err) {
     console.error('Error fetching food pools:', err);
     res.status(500).json({ error: 'Failed to fetch food pools' });
+  }
+});
+
+// POST /api/admin/pools - Admin Route to Launch New Food Pools
+app.post('/api/admin/pools', verifyAdminMiddleware, async (req, res) => {
+  const { 
+    item_name, target_item_name, price_per_slot, 
+    total_slots, sourcing_market 
+  } = req.body;
+
+  if (!item_name || !price_per_slot || !total_slots) {
+    return res.status(400).json({ error: 'Missing required pool details.' });
+  }
+
+  try {
+    const insertQuery = `
+      INSERT INTO food_pools (pool_title, target_item_name, price_per_slot, total_slots, sourcing_market)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+    const values = [item_name, target_item_name || item_name, price_per_slot, total_slots, sourcing_market || 'Mandate Market'];
+    
+    const newPool = await db.query(insertQuery, values);
+
+    res.status(201).json({
+      status: "success",
+      message: `Food Pool "${item_name}" launched successfully!`,
+      pool: newPool.rows[0]
+    });
+  } catch (err) {
+    console.error("Create Food Pool Error:", err.message);
+    res.status(500).json({ error: "Server error while creating food pool." });
   }
 });
 
