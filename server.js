@@ -1178,9 +1178,16 @@ app.post('/api/vendors/checkout', async (req, res) => {
 
         const vendorShopinFee = 200;
         
+        // 🌟 Enforce ₦3,000 for outside areas on the backend!
         let deliveryFee = 0;
         if (delivery_mode.toUpperCase() === 'DELIVERY') {
-          deliveryFee = delivery_zone === 'alhikmah' ? 1500 : 2000;
+          if (delivery_zone === 'alhikmah') {
+            deliveryFee = 1500;
+          } else if (delivery_zone === 'custom_kwara') {
+            deliveryFee = 3000; // 🔥 Outside Selected Routes
+          } else {
+            deliveryFee = 2000; // Standard Outer Zone
+          }
         }
 
         const itemCost = parseFloat(product.price_ngn || 0);
@@ -2156,7 +2163,8 @@ app.post('/api/orders/join-shuttle', async (req, res) => {
                             routeNameLower.includes('alhikmah') || 
                             routeNameLower.includes('apalara');
 
-        const discountedDeliveryFee = isInnerZone ? 1300 : 1800;
+        // 🌟 Updated to ₦500 discount: ₦1000 for inner zone, ₦1500 for outer
+        const discountedDeliveryFee = isInnerZone ? 1000 : 1500;
 
         const newTotal = parseFloat(order.total_estimated_cost) - parseFloat(order.delivery_fee) + discountedDeliveryFee;
 
