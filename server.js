@@ -1550,13 +1550,14 @@ app.post('/api/pooling/contribute', async (req, res) => {
     }
 });
 
-// Route 20: Live Market Price Ticker
+// Route 20: Live Market Price Ticker (Updated to collapse duplicates)
 app.get('/api/market/ticker', async (req, res) => {
     try {
         const tickerQuery = `
-            SELECT item_name, unit, min_price_ngn, max_price_ngn, sourcing_market 
+            SELECT DISTINCT ON (LOWER(item_name), LOWER(unit)) 
+                id, item_name, unit, min_price_ngn, max_price_ngn, sourcing_market, last_updated 
             FROM market_prices 
-            ORDER BY last_updated DESC 
+            ORDER BY LOWER(item_name) ASC, LOWER(unit) ASC, last_updated DESC;
         `;
         const prices = await db.query(tickerQuery);
 
