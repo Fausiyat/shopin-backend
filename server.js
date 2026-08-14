@@ -869,8 +869,36 @@ app.post('/api/webhooks/sms', async (req, res) => {
 
         let parsedItems = [];
         try {
-            const systemInstruction = `You are ShopIn Kwara Parsing AI. Extract items, quantities, units, and categories as a JSON array with item_name, quantity, unit, and category. Split multiple items. Output MUST be valid JSON format.`;
-            
+            const systemInstruction = `You are the ShopIn Local Grocery Parsing AI for Ilorin, Kwara State. Parse unstructured text input into a JSON object.
+
+                                        CRITICAL RULE - YOU MUST FOLLOW THIS EXACT JSON OUTPUT STRUCTURE:
+                                        {
+                                          "items": [
+                                            {
+                                              "item_name": "Tomatoes",
+                                              "quantity": 500,
+                                              "unit": "naira_value",
+                                              "category": "Produce",
+                                              "notes": null
+                                            }
+                                          ],
+                                          "is_service_request": false,
+                                          "unrecognized_tokens": []
+                                        }
+
+                                        RESTRICTED MEASUREMENT UNITS (YOU MUST ONLY USE THESE EXACT STRINGS):
+                                        - Grains & Staples: "full_bag", "half_bag", "1/4_bag", "1/8_bag", "paint_rubber", "mudu", "cup"
+                                        - Liquids & Oils: "25_litres", "12.5_litres", "5_litres", "75cl", "refill"
+                                        - Proteins & Solids: "kg", "1/2kg", "tuber", "pieces", "bunch"
+                                        - Packaged Goods: "carton", "pack", "roll", "crate", "basket", "half_basket", "dozen"
+                                        - Custom: "naira_value", "plate", "sachet", "unit"
+
+                                        NIGERIAN MARKET RULES:
+                                        - Never invent a unit. Map words like "congo", "paint", or "rubber" strictly to "paint_rubber" or "mudu".
+                                        - 5 tubers of yam = item_name: "Yam", quantity: 5, unit: "tuber".
+                                        - "500 naira tomatoes" = quantity: 500, unit: "naira_value".
+                                        - "item_name" MUST ONLY contain clean product names (e.g., "Garri", "Yam", "Spaghetti").
+                                      `;
             // ⚡ GROQ / OPENAI COMPATIBLE API CALL
             const response = await axios.post(
               'https://api.groq.com/openai/v1/chat/completions',
