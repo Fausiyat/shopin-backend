@@ -2205,7 +2205,7 @@ app.post('/api/admin/approve-deposit', verifyAdminMiddleware, async (req, res) =
 app.get('/api/admin/pending-deposits', verifyAdminMiddleware, async (req, res) => {
     try {
         const query = `
-            SELECT pd.id, pd.amount_ngn, pd.status, pd.created_at, u.full_name, u.shopin_id 
+            SELECT pd.id, pd.amount_ngn, pd.status, pd.created_at,, pd.sender_name, u.full_name, u.shopin_id 
             FROM pending_deposits pd
             JOIN users u ON pd.user_id = u.id
             WHERE pd.status = 'PENDING'
