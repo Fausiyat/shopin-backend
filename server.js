@@ -2219,6 +2219,18 @@ app.get('/api/admin/pending-deposits', verifyAdminMiddleware, async (req, res) =
     }
 });
 
+// Route 26f: Admin Rejects/Deletes a Pending Deposit
+app.post('/api/admin/reject-deposit', verifyAdminMiddleware, async (req, res) => {
+    const { pending_deposit_id } = req.body;
+    try {
+        await db.query("DELETE FROM pending_deposits WHERE id = $1", [pending_deposit_id]);
+        res.status(200).json({ status: "success", message: "Pending deposit removed." });
+    } catch (err) {
+        console.error("Reject Deposit Error:", err.message);
+        res.status(500).json({ error: "Server error rejecting deposit." });
+    }
+});
+
 // Route 27: Setup Batch Shuttles
 app.get('/api/admin/setup-shuttles', async (req, res) => {
     try {
