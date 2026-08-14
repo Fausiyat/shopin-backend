@@ -712,6 +712,63 @@ app.put('/api/admin/prices/update', async (req, res) => {
   }
 });
 
+// 🌟 ADMIN ROUTE: CREDIT USER WALLET (REFUNDS & CHANGE)
+app.post('/api/admin/credit-wallet', async (req, res) => {
+  const { shopin_id, amount } = req.body;
+  const adminPin = req.headers['x-admin-pin'];
+
+  // 1. Basic Admin Security Check
+  const VALID_PIN = process.env.ADMIN_PIN || '1234'; 
+  if (adminPin !== VALID_PIN) {
+    return res.status(403).json({ error: 'Unauthorized: Invalid Admin PIN' });
+  }
+
+  // 2. Validate input
+  if (!shopin_id || !amount || amount <= 0) {
+    return res.status(400).json({ error: 'Invalid ShopIn ID or Amount' });
+  }
+
+  try {
+    // 3. Find the user AND their attached wallet ID at the same time
+    const userQuery = await db.query(`
+      SELECT u.id AS user_id, w.id AS wallet_id 
+      FROM users u
+      JOIN stash_wallets w ON u.id = w.user_id
+      WHERE u.shopin_id = $1
+    `, [shopin_id]);
+    
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'User or wallet not found in database.' });
+    }
+
+    const { user_id, wallet_id } = userQuery.rows[0];
+
+    // 4. Update the exact Stash Wallet attached to this user
+    await db.query(
+      'UPDATE stash_wallets SET available_balance = available_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
+      [amount, user_id]
+    );
+
+    // 5. 🌟 BONUS: Write a receipt to your wallet_transactions ledger!
+    const refCode = `REFUND-${Date.now()}`;
+    await db.query(
+      `INSERT INTO wallet_transactions 
+       (wallet_id, transaction_type, amount, reference_code, status, narration) 
+       VALUES ($1, 'REFUND', $2, $3, 'SUCCESS', 'Admin Wallet Refund / Market Overage')`,
+      [wallet_id, amount, refCode]
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      message: `Successfully credited ₦${amount} to ${shopin_id}.` 
+    });
+
+  } catch (error) {
+    console.error('Wallet Credit Error:', error);
+    res.status(500).json({ error: 'Internal server error while crediting wallet.' });
+  }
+});
+
 // Route 6: Order Quote Calculator
 app.post('/api/orders/quote', async (req, res) => {
     try {
@@ -2059,10 +2116,11 @@ app.get('/api/admin/setup-pending-deposits', async (req, res) => {
 
 // Route 26c: User Submits a Manual Deposit Claim
 app.post('/api/wallet/request-deposit', async (req, res) => {
-    const { shopin_id, amount_ngn } = req.body;
+    const { shopin_id, amount_ngn, sender_name } = req.body;
 
-    if (!shopin_id || !amount_ngn || amount_ngn <= 0) {
-        return res.status(400).json({ error: 'ShopIn ID and a valid amount are required.' });
+    // 🌟 Validate that shopin_id, amount, AND sender name are present
+    if (!shopin_id || !amount_ngn || amount_ngn <= 0 || !sender_name || !sender_name.trim()) {
+        return res.status(400).json({ error: 'ShopIn ID, amount, and sender name are required.' });
     }
 
     try {
@@ -2070,12 +2128,12 @@ app.post('/api/wallet/request-deposit', async (req, res) => {
         const userQuery = await db.query('SELECT id FROM users WHERE shopin_id = $1', [shopin_id.trim()]);
         if (userQuery.rows.length === 0) return res.status(404).json({ error: 'User not found.' });
         
-        // 2. Log the pending claim
+        // 2. Log the pending claim including the sender's name
         const insertQuery = `
-            INSERT INTO pending_deposits (user_id, amount_ngn)
-            VALUES ($1, $2) RETURNING *;
+            INSERT INTO pending_deposits (user_id, amount_ngn, sender_name)
+            VALUES ($1, $2, $3) RETURNING *;
         `;
-        const result = await db.query(insertQuery, [userQuery.rows[0].id, amount_ngn]);
+        const result = await db.query(insertQuery, [userQuery.rows[0].id, amount_ngn, sender_name.trim()]);
 
         res.status(201).json({ 
             status: "success", 
@@ -2123,9 +2181,11 @@ app.post('/api/admin/approve-deposit', verifyAdminMiddleware, async (req, res) =
 
         // 4. Record in Transaction Ledger
         const refCode = `OPAY-MANUAL-${Math.floor(100000 + Math.random() * 900000)}`;
+        
+        // 🚨 THE FIX: Changed 'amount_ngn' to 'amount' to perfectly match your database schema!
         await client.query(
-            `INSERT INTO wallet_transactions (wallet_id, transaction_type, amount_ngn, reference_code)
-             VALUES ($1, 'MANUAL_DEPOSIT', $2, $3)`,
+            `INSERT INTO wallet_transactions (wallet_id, transaction_type, amount, reference_code, narration)
+             VALUES ($1, 'DEPOSIT', $2, $3, 'Admin Approved OPay Transfer')`,
             [walletResult.rows[0].id, deposit.amount_ngn, refCode]
         );
 
