@@ -866,15 +866,27 @@ app.post('/api/orders/create', async (req, res) => {
         const estimatedItemCost = req.body.estimated_item_cost || 0;
         const orderCode = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
-        // 4. Save the Order Receipt
+        // 4. Save the Order Receipt (CORRECTED)
         const insertOrderQuery = `
             INSERT INTO orders (
                 order_code, user_id, channel, raw_input_text, parsed_json, 
                 estimated_item_cost, service_fee, delivery_fee, processing_fee, total_estimated_cost, order_status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'PENDING_CONFIRMATION')
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING *;
         `;
-        const orderValues = [orderCode, userId, channel, raw_text, JSON.stringify(parsedOutput), estimatedItemCost, serviceFee, deliveryFee, processingFee, grandTotal];
+        const orderValues = [
+          orderCode, 
+          userId, 
+          channel, 
+          raw_text, 
+          JSON.stringify(parsedOutput), 
+          estimatedItemCost, 
+          serviceFee, 
+          deliveryFee, 
+          processingFee, 
+          grandTotal, 
+          'PENDING_CONFIRMATION'
+        ];
         const savedOrder = await client.query(insertOrderQuery, orderValues);
 
         await client.query('COMMIT'); // Success! Save everything.
