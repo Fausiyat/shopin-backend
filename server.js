@@ -3014,6 +3014,30 @@ app.put('/api/admin/orders/:id/status', verifyAdminMiddleware, async (req, res) 
   }
 });
 
+// 👤 USER: Fetch Active/Pending Orders for Customer Tracker
+app.get('/api/user/orders', async (req, res) => {
+  const { shopin_id } = req.query;
+
+  if (!shopin_id) {
+    return res.status(400).json({ error: 'User identifier is required.' });
+  }
+
+  try {
+    const query = `
+      SELECT o.* FROM orders o 
+      JOIN users u ON o.user_id = u.id 
+      WHERE u.shopin_id = $1 
+      ORDER BY o.created_at DESC;
+    `;
+    
+    const result = await db.query(query, [shopin_id]);
+    res.status(200).json({ status: 'success', orders: result.rows });
+  } catch (err) {
+    console.error("Fetch User Orders Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch user orders." });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 ShopIn Backend running on http://localhost:${PORT}`);
