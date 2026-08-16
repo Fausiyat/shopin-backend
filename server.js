@@ -2952,6 +2952,68 @@ app.post('/api/admin/categories', verifyAdminMiddleware, async (req, res) => {
   }
 });
 
+// 🔒 ADMIN: Fetch All Active/Pending Orders for Admin Console
+app.get('/api/admin/orders', verifyAdminMiddleware, async (req, res) => {
+  try {
+    const ordersQuery = await db.query(`
+      SELECT 
+        o.id, 
+        o.order_code, 
+        o.raw_input_text, 
+        o.parsed_json, 
+        o.total_estimated_cost, 
+        o.delivery_fee, 
+        o.service_fee, 
+        o.processing_fee, 
+        o.order_status, 
+        o.created_at,
+        u.full_name AS customer_name,
+        u.phone_number AS customer_phone
+      FROM orders o
+      LEFT JOIN users u ON o.user_id = u.id
+      ORDER BY o.created_at DESC;
+    `);
+
+    res.status(200).json({
+      status: 'success',
+      orders: ordersQuery.rows
+    });
+  } catch (err) {
+    console.error("Fetch Admin Orders Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch orders." });
+  }
+});
+
+// 🔒 ADMIN: Update Order Status (Shopping, Action Required, Completed)
+app.put('/api/admin/orders/:id/status', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { order_status } = req.body;
+
+  if (!order_status) {
+    return res.status(400).json({ error: 'Order status is required.' });
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE orders SET order_status = $1 WHERE id = $2 RETURNING *`,
+      [order_status, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: `Order status updated to ${order_status}!`,
+      order: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Update Order Status Error:", err.message);
+    res.status(500).json({ error: 'Server error updating order status.' });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 ShopIn Backend running on http://localhost:${PORT}`);
