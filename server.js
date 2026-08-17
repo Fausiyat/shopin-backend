@@ -466,18 +466,28 @@ app.post('/api/vendors/register', async (req, res) => {
 });
 
 // 🔒 ADMIN: Fetch Unverified Pending Vendors
+// 🔒 ADMIN: Fetch All Vendors (Pending & Active) With Bank Details
 app.get('/api/admin/pending-vendors', verifyAdminMiddleware, async (req, res) => {
   try {
     const result = await db.query(`
-      SELECT id, shopin_id, full_name, phone_number, email, vendor_category, contact_mode, created_at 
+      SELECT 
+        id, shopin_id, full_name, phone_number, email, 
+        vendor_category, contact_mode, is_verified, created_at,
+        bank_name, account_number, account_name
       FROM users 
-      WHERE user_role = 'vendor' AND is_verified = FALSE 
+      WHERE user_role = 'vendor' OR shopin_id LIKE 'VND-%'
       ORDER BY created_at DESC;
     `);
-    res.status(200).json({ status: 'success', pending_vendors: result.rows });
+    
+    // Returning both 'pending_vendors' and 'vendors' keys ensures the frontend gets the data
+    res.status(200).json({ 
+      status: 'success', 
+      pending_vendors: result.rows,
+      vendors: result.rows 
+    });
   } catch (err) {
-    console.error("Fetch Pending Vendors Error:", err.message);
-    res.status(500).json({ error: "Failed to fetch pending vendors." });
+    console.error("Fetch Vendors Error:", err.message);
+    res.status(500).json({ error: "Failed to fetch vendors." });
   }
 });
 
@@ -1468,12 +1478,19 @@ app.post('/api/vendors/reviews', async (req, res) => {
 });
 
 // Update Route: Fetch All Verified Vendor Products & Services
+// Update Route: Fetch All Verified Vendor Products & Services (WITH BANK DETAILS)
 app.get('/api/vendors/products', async (req, res) => {
     try {
         const queryText = `
-            SELECT vp.*, u.full_name as vendor_name, u.phone_number 
+            SELECT 
+              vp.*, 
+              u.full_name as vendor_name, 
+              u.phone_number,
+              u.bank_name,
+              u.account_number,
+              u.account_name
             FROM vendor_products vp
-            JOIN users u ON vp.vendor_id = u.id
+            LEFT JOIN users u ON (vp.vendor_id = u.id OR vp.shopin_id = u.shopin_id)
             WHERE u.is_verified = TRUE
             ORDER BY vp.created_at DESC;
         `;
