@@ -594,12 +594,17 @@ app.post('/api/orders/parse-list', async (req, res) => {
 // Route 4b: Save Order directly from Frontend
 app.post('/api/orders', async (req, res) => {
   const { 
-    user_id, 
+    user_id,
+    shopin_id, 
     channel = 'WEB', 
     raw_input_text, 
     parsed_json, 
     delivery_fee = 1500, 
-    service_fee = 500 
+    service_fee = 500,
+    processing_fee = 0,
+    estimated_item_cost,
+    estimated_total,
+    deposit_paid
   } = req.body;
 
   if (!raw_input_text || !parsed_json || !parsed_json.items) {
@@ -610,46 +615,74 @@ app.post('/api/orders', async (req, res) => {
   }
 
   try {
-    const ESTIMATED_PRICES = {
-      paint_rubber: 2800,
-      derica: 1200,
-      tuber: 2500,
-      congo: 2200,
-      module: 1600,
-      crate: 4200,
-      keg_25l: 38000,
-      full_bag: 82000,
-      default: 1500
-    };
+    // 1. Resolve User ID (UUID) if shopin_id was sent from localStorage
+    let resolvedUserId = user_id || null;
+    if (!resolvedUserId && shopin_id) {
+      const userRes = await db.query(
+        `SELECT id FROM users WHERE shopin_id = $1 LIMIT 1;`, 
+        [shopin_id.trim()]
+      );
+      if (userRes.rows.length > 0) {
+        resolvedUserId = userRes.rows[0].id;
+      }
+    }
 
-    const estimated_item_cost = parsed_json.items.reduce((sum, item) => {
-      const unitKey = item.unit?.toLowerCase() || 'default';
-      const unitPrice = ESTIMATED_PRICES[unitKey] || ESTIMATED_PRICES.default;
-      return sum + ((item.quantity || 1) * unitPrice);
-    }, 0);
+    // 2. Use the client's verified pricing or fallback to server estimates
+    let finalItemCost = estimated_item_cost;
+    if (finalItemCost === undefined || finalItemCost === null) {
+      const ESTIMATED_PRICES = {
+        paint_rubber: 2800,
+        derica: 1200,
+        tuber: 2500,
+        congo: 2200,
+        module: 1600,
+        crate: 4200,
+        keg_25l: 38000,
+        full_bag: 82000,
+        default: 1500
+      };
 
-    const total_estimated_cost = estimated_item_cost + delivery_fee + service_fee;
+      finalItemCost = parsed_json.items.reduce((sum, item) => {
+        const unitKey = item.unit?.toLowerCase() || 'default';
+        const unitPrice = item.price || ESTIMATED_PRICES[unitKey] || ESTIMATED_PRICES.default;
+        return sum + ((item.quantity || 1) * unitPrice);
+      }, 0);
+    }
+
+    const finalTotalCost = estimated_total ?? (finalItemCost + Number(delivery_fee) + Number(service_fee) + Number(processing_fee));
+    const initialDepositPaid = deposit_paid ?? finalTotalCost;
     const order_code = `ORD-${Math.floor(10000 + Math.random() * 90000)}`;
 
+    // 3. Insert order including deposit_paid
     const queryText = `
       INSERT INTO orders (
-        order_code, user_id, channel, raw_input_text, parsed_json,
-        estimated_item_cost, service_fee, delivery_fee, total_estimated_cost, order_status
+        order_code, 
+        user_id, 
+        channel, 
+        raw_input_text, 
+        parsed_json,
+        estimated_item_cost, 
+        service_fee, 
+        delivery_fee, 
+        total_estimated_cost, 
+        deposit_paid,
+        order_status
       ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'PENDING_CONFIRMATION')
       RETURNING *;
     `;
 
     const values = [
       order_code,
-      user_id || null,
+      resolvedUserId,
       channel,
       raw_input_text,
-      JSON.stringify(parsed_json),
-      estimated_item_cost,
+      typeof parsed_json === 'string' ? parsed_json : JSON.stringify(parsed_json),
+      finalItemCost,
       service_fee,
       delivery_fee,
-      total_estimated_cost,
+      finalTotalCost,
+      initialDepositPaid,
       'PENDING_CONFIRMATION'
     ];
 
