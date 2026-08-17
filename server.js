@@ -1477,20 +1477,20 @@ app.post('/api/vendors/reviews', async (req, res) => {
     }
 });
 
-// Update Route: Fetch All Verified Vendor Products & Services
 // Update Route: Fetch All Verified Vendor Products & Services (WITH BANK DETAILS)
 app.get('/api/vendors/products', async (req, res) => {
     try {
         const queryText = `
             SELECT 
               vp.*, 
+              u.shopin_id,
               u.full_name as vendor_name, 
               u.phone_number,
               u.bank_name,
               u.account_number,
               u.account_name
             FROM vendor_products vp
-            LEFT JOIN users u ON (vp.vendor_id = u.id OR vp.shopin_id = u.shopin_id)
+            JOIN users u ON vp.vendor_id = u.id
             WHERE u.is_verified = TRUE
             ORDER BY vp.created_at DESC;
         `;
