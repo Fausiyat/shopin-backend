@@ -3065,10 +3065,11 @@ app.get('/api/admin/orders', verifyAdminMiddleware, async (req, res) => {
         o.processing_fee, 
         o.order_status, 
         o.created_at,
-        u.full_name AS customer_name,
-        u.phone_number AS customer_phone
+        COALESCE(u.full_name, o.parsed_json->>'customer_name', 'Guest Customer') AS customer_name,
+        COALESCE(u.phone_number, o.parsed_json->>'customer_phone', 'No Phone') AS customer_phone
       FROM orders o
       LEFT JOIN users u ON o.user_id = u.id
+      WHERE o.order_status NOT IN ('COMPLETED', 'DELIVERED')
       ORDER BY o.created_at DESC;
     `);
 
@@ -3113,6 +3114,28 @@ app.put('/api/admin/orders/:id/status', verifyAdminMiddleware, async (req, res) 
   } catch (err) {
     console.error("Update Order Status Error:", err.message);
     res.status(500).json({ error: 'Server error updating order status: ' + err.message });
+  }
+});
+
+// Route: Delete an Order (Admin)
+app.delete('/api/admin/orders/:id', verifyAdminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query(
+      `DELETE FROM orders 
+       WHERE id::text = $1 OR order_code = $1 
+       RETURNING *;`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    res.json({ success: true, message: `Order ${id} deleted successfully.` });
+  } catch (err) {
+    console.error('Delete Order Error:', err.message);
+    res.status(500).json({ error: 'Failed to delete order: ' + err.message });
   }
 });
 
