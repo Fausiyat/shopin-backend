@@ -631,15 +631,34 @@ app.post('/api/orders', async (req, res) => {
     let finalItemCost = estimated_item_cost;
     if (finalItemCost === undefined || finalItemCost === null) {
       const ESTIMATED_PRICES = {
+        // Bulk Staple Units
+        full_bag: 82000,
+        half_bag: 41000,
+        quarter_bag: 21000,
+        keg_25l: 38000,
+        keg_5l: 8500,
+        crate: 4500,
+        basket: 6000,
+
+        // Standard Market Measures
         paint_rubber: 2800,
         derica: 1200,
-        tuber: 2500,
         congo: 2200,
         module: 1600,
-        crate: 4200,
-        keg_25l: 38000,
-        full_bag: 82000,
-        default: 1500
+        mudu: 1600,
+        tuber: 2500,
+
+        // Everyday Provisions & Packaged Goods
+        refill: 3500,
+        pack: 2500,
+        roll: 1800,
+        carton: 12500,
+        bottle: 1200,
+        can: 900,
+        piece: 800,
+        pieces: 800,
+        unit: 1500,         // 👈 Safe default for 'unit'
+        default: 1500       // 👈 Prevents unknown items from defaulting to 82,000
       };
 
       finalItemCost = parsed_json.items.reduce((sum, item) => {
