@@ -196,6 +196,107 @@ app.delete('/api/admin/prices/:id', verifyAdminMiddleware, async (req, res) => {
   }
 });
 
+// Route: Update an item (Admin or Vendor)
+app.put('/api/admin/vendor-products/:id', async (req, res) => {
+  const { id } = req.params;
+  const { product_name, price_ngn, category, service_type } = req.body;
+
+  try {
+    const result = await db.query(
+      `UPDATE vendor_products 
+       SET 
+         product_name = COALESCE($1, product_name),
+         price_ngn = COALESCE($2, price_ngn),
+         category = COALESCE($3, category),
+         service_type = COALESCE($4, service_type),
+         updated_at = NOW()
+       WHERE id::text = $5 OR shopin_id = $5
+       RETURNING *;`,
+      [product_name, price_ngn, category, service_type, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Product not found.' });
+    }
+
+    res.json({ success: true, product: result.rows[0] });
+  } catch (err) {
+    console.error('Update Product Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route: Delete a vendor product
+app.delete('/api/admin/vendor-products/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await db.query(
+      `DELETE FROM vendor_products WHERE id::text = $1 RETURNING *;`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Product not found.' });
+    }
+
+    res.json({ success: true, message: 'Item deleted.' });
+  } catch (err) {
+    console.error('Delete Product Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route: Save Dynamic Locations
+app.put('/api/admin/locations', async (req, res) => {
+  const { category, locations_array } = req.body;
+  try {
+    await db.query(
+      `INSERT INTO dynamic_locations (category, locations)
+       VALUES ($1, $2)
+       ON CONFLICT (category) DO UPDATE SET locations = EXCLUDED.locations;`,
+      [category, JSON.stringify(locations_array)]
+    );
+    res.json({ success: true, message: 'Locations saved to database.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route: Update Vendor Bank Details (Admin or Vendor)
+app.put('/api/admin/vendors/:id/bank-details', async (req, res) => {
+  const { id } = req.params;
+  const { bank_name, account_number, account_name } = req.body;
+
+  if (!account_number || !bank_name) {
+    return res.status(400).json({ error: 'Bank name and account number are required.' });
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE users 
+       SET 
+         bank_name = $1,
+         account_number = $2,
+         account_name = $3
+       WHERE id::text = $4 OR shopin_id = $4
+       RETURNING id, full_name, shopin_id, bank_name, account_number, account_name;`,
+      [bank_name.trim(), account_number.trim(), account_name?.trim() || null, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Vendor not found.' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Vendor bank details updated successfully!', 
+      vendor: result.rows[0] 
+    });
+  } catch (err) {
+    console.error('Update Vendor Bank Error:', err.message);
+    res.status(500).json({ error: 'Failed to update bank details: ' + err.message });
+  }
+});
 
 // 📱 EBULKSMS NOTIFICATION HELPER
 const sendSMS = async (to, message) => {
