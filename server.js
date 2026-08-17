@@ -3144,22 +3144,34 @@ app.get('/api/user/orders', async (req, res) => {
   const { shopin_id } = req.query;
 
   if (!shopin_id) {
-    return res.status(400).json({ error: 'User identifier is required.' });
+    return res.status(400).json({ error: 'User identifier (shopin_id) is required.' });
   }
+
+  const cleanId = shopin_id.trim();
 
   try {
     const query = `
-      SELECT o.* FROM orders o 
-      JOIN users u ON o.user_id = u.id 
+      SELECT o.* 
+      FROM orders o 
+      LEFT JOIN users u ON o.user_id = u.id 
       WHERE u.shopin_id = $1 
+         OR o.user_id::text = $1 
+         OR o.parsed_json->>'shopin_id' = $1
+         OR o.parsed_json->'user'->>'shopin_id' = $1
       ORDER BY o.created_at DESC;
     `;
     
-    const result = await db.query(query, [shopin_id]);
-    res.status(200).json({ status: 'success', orders: result.rows });
+    const result = await db.query(query, [cleanId]);
+    
+    // Return both raw array and structured object to prevent frontend mismatch
+    res.status(200).json({ 
+      status: 'success', 
+      orders: result.rows,
+      data: result.rows 
+    });
   } catch (err) {
     console.error("Fetch User Orders Error:", err.message);
-    res.status(500).json({ error: "Failed to fetch user orders." });
+    res.status(500).json({ error: "Failed to fetch user orders: " + err.message });
   }
 });
 
