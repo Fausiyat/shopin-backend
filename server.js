@@ -291,9 +291,18 @@ app.post('/api/users/register', async (req, res) => {
     }
 });
 
-// Route 2b: Register Vendor (Default unverified for security)
+// Route 2b: Register Vendor (With Bank Details & Error Handling)
 app.post('/api/vendors/register', async (req, res) => {
-    const { full_name, phone_number, email, vendor_category, contact_mode = 'MIDDLEMAN' } = req.body;
+    const { 
+        full_name, 
+        phone_number, 
+        email, 
+        vendor_category, 
+        contact_mode = 'MIDDLEMAN',
+        bank_name,
+        account_number,
+        account_name
+    } = req.body;
 
     if (!full_name || !phone_number || !vendor_category) {
         return res.status(400).json({ error: 'Full name, phone number, and vendor category are required.' });
@@ -304,21 +313,46 @@ app.post('/api/vendors/register', async (req, res) => {
         const shopin_id = `VND-ILR-${randomNum}`;
 
         const queryText = `
-            INSERT INTO users (shopin_id, full_name, phone_number, email, user_role, vendor_category, contact_mode, is_verified)
-            VALUES ($1, $2, $3, $4, 'vendor', $5, $6, FALSE)
+            INSERT INTO users (
+                shopin_id, 
+                full_name, 
+                phone_number, 
+                email, 
+                user_role, 
+                vendor_category, 
+                contact_mode, 
+                is_verified,
+                bank_name,
+                account_number,
+                account_name
+            )
+            VALUES ($1, $2, $3, $4, 'vendor', $5, $6, FALSE, $7, $8, $9)
             RETURNING *;
         `;
-        const values = [shopin_id, full_name, phone_number, email || null, vendor_category, contact_mode.toUpperCase()];
+        const values = [
+            shopin_id, 
+            full_name.trim(), 
+            phone_number.trim(), 
+            email ? email.trim() : null, 
+            vendor_category, 
+            contact_mode.toUpperCase(),
+            bank_name ? bank_name.trim() : null,
+            account_number ? account_number.trim() : null,
+            account_name ? account_name.trim() : null
+        ];
         const result = await db.query(queryText, values);
 
         // 🔔 ADMIN ALERT: New Vendor Awaiting Approval
         const adminPhone = process.env.ADMIN_PHONE_NUMBER || '08143086509';
         const smsAlert = `[ShopIn Admin] ⚠️ NEW VENDOR PENDING APPROVAL!\nBusiness: ${full_name}\nCategory: ${vendor_category}\nReview in Admin Console.`;
-        sendSMS(adminPhone, smsAlert).catch(err => console.warn("Admin SMS alert failed:", err.message));
+        
+        if (typeof sendSMS === 'function') {
+            sendSMS(adminPhone, smsAlert).catch(err => console.warn("Admin SMS alert failed:", err.message));
+        }
 
         res.status(201).json({
             status: "success",
-            message: `Registration received! Your account is pending admin verification.`,
+            message: "Registration received! Your account is pending admin verification.",
             vendor_data: result.rows[0]
         });
     } catch (err) {
@@ -326,7 +360,7 @@ app.post('/api/vendors/register', async (req, res) => {
             return res.status(400).json({ error: 'A user or vendor with this phone number already exists.' });
         }
         console.error("Vendor Register Error:", err.message);
-        res.status(500).json({ error: 'Server error while registering vendor.' });
+        res.status(500).json({ error: 'Server error while registering vendor: ' + err.message });
     }
 });
 
