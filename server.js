@@ -406,6 +406,37 @@ app.put('/api/admin/vendors/:id/verify', verifyAdminMiddleware, async (req, res)
   }
 });
 
+// Route: Delete / Reject Unverified Vendor
+app.delete('/api/admin/vendors/:identifier', async (req, res) => {
+  const { identifier } = req.params;
+
+  try {
+    // Delete any unverified products linked to this vendor first
+    await db.query(
+      `DELETE FROM vendor_products 
+       WHERE vendor_id IN (SELECT id FROM users WHERE id::text = $1 OR shopin_id = $1);`,
+      [identifier]
+    );
+
+    // Delete the vendor profile from the users table
+    const result = await db.query(
+      `DELETE FROM users 
+       WHERE (id::text = $1 OR shopin_id = $1) AND user_role = 'vendor' 
+       RETURNING *;`,
+      [identifier]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Vendor not found.' });
+    }
+
+    res.json({ success: true, message: 'Vendor rejected and deleted successfully.' });
+  } catch (err) {
+    console.error('Delete Vendor Error:', err.message);
+    res.status(500).json({ error: 'Failed to delete vendor: ' + err.message });
+  }
+});
+
 // Route 3: Save Delivery Address
 app.post('/api/users/address', async (req, res) => {
     try {
