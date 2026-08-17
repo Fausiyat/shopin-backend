@@ -942,11 +942,12 @@ app.put('/api/admin/prices/update', async (req, res) => {
 
 // 🌟 ADMIN ROUTE: CREDIT USER WALLET (REFUNDS & CHANGE)
 app.post('/api/admin/credit-wallet', async (req, res) => {
-  const { shopin_id, amount } = req.body;
+  const { shopin_id, amount, amount_ngn } = req.body;
+  const finalAmount = amount || amount_ngn;
   const adminPin = req.headers['x-admin-pin'];
 
   // 1. Basic Admin Security Check
-  const VALID_PIN = process.env.ADMIN_PIN || '1234'; 
+  const VALID_PIN = process.env.ADMIN_PIN; 
   if (adminPin !== VALID_PIN) {
     return res.status(403).json({ error: 'Unauthorized: Invalid Admin PIN' });
   }
