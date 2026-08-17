@@ -3052,16 +3052,20 @@ app.get('/api/admin/orders', verifyAdminMiddleware, async (req, res) => {
 // 🔒 ADMIN: Update Order Status (Shopping, Action Required, Completed)
 app.put('/api/admin/orders/:id/status', verifyAdminMiddleware, async (req, res) => {
   const { id } = req.params;
-  const { order_status } = req.body;
+  const status = req.body.order_status || req.body.status;
 
-  if (!order_status) {
+  if (!status) {
     return res.status(400).json({ error: 'Order status is required.' });
   }
 
   try {
+    // 🌟 Cast id::text and check order_code so UUIDs and 'ORD-...' codes both work
     const result = await db.query(
-      `UPDATE orders SET order_status = $1 WHERE id = $2 RETURNING *`,
-      [order_status, id]
+      `UPDATE orders 
+       SET order_status = $1 
+       WHERE id::text = $2 OR order_code = $2 
+       RETURNING *;`,
+      [status.toUpperCase(), id]
     );
 
     if (result.rowCount === 0) {
@@ -3070,12 +3074,12 @@ app.put('/api/admin/orders/:id/status', verifyAdminMiddleware, async (req, res) 
 
     res.status(200).json({
       status: 'success',
-      message: `Order status updated to ${order_status}!`,
+      message: `Order status updated to ${status}!`,
       order: result.rows[0]
     });
   } catch (err) {
     console.error("Update Order Status Error:", err.message);
-    res.status(500).json({ error: 'Server error updating order status.' });
+    res.status(500).json({ error: 'Server error updating order status: ' + err.message });
   }
 });
 
