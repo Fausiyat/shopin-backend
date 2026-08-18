@@ -111,7 +111,7 @@ app.use('/api/notifications/send-sms', strictLimiter);
 // 🔒 Secure Admin Middleware
 const verifyAdminMiddleware = (req, res, next) => {
   const clientPin = req.headers['x-admin-pin'];
-  const storedAdminPin = process.env.ADMIN_PIN || '1234';
+  const storedAdminPin = process.env.ADMIN_PIN ;
 
   if (!clientPin || clientPin.trim() !== storedAdminPin.trim()) {
     return res.status(403).json({ error: 'Unauthorized: Admin access required.' });
@@ -122,7 +122,7 @@ const verifyAdminMiddleware = (req, res, next) => {
 // 🔒 Upgraded Shopper or Admin Middleware (Checks Database for Dynamic Shopper PIN)
 const verifyShopperOrAdminMiddleware = async (req, res, next) => {
   const clientPin = req.headers['x-admin-pin'] || req.headers['x-shopper-pin'];
-  const validAdminPin = process.env.ADMIN_PIN || '1234';
+  const validAdminPin = process.env.ADMIN_PIN;
 
   if (!clientPin) {
     return res.status(403).json({ error: 'Unauthorized: Access PIN required.' });
@@ -344,7 +344,7 @@ app.get('/api/health', (req, res) => {
 // Route: Verify Admin Passcode Securely
 app.post('/api/admin/verify-pin', (req, res) => {
   const { pin } = req.body;
-  const validAdminPin = process.env.ADMIN_PIN || '1234';
+  const validAdminPin = process.env.ADMIN_PIN;
 
   if (!pin || pin.trim() !== validAdminPin) {
     return res.status(401).json({ error: 'Invalid admin passcode.' });
@@ -3027,7 +3027,7 @@ app.post('/api/users/address', async (req, res) => {
 // Route: Verify Admin Passcode Securely
 app.post('/api/admin/verify-pin', (req, res) => {
   const { pin } = req.body;
-  const validAdminPin = process.env.ADMIN_PIN || '1234'; // Default fallback PIN
+  const validAdminPin = process.env.ADMIN_PIN; // Default fallback PIN
 
   if (!pin || pin.trim() !== validAdminPin) {
     return res.status(401).json({ error: 'Invalid admin passcode.' });
